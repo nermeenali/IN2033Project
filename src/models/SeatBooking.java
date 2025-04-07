@@ -10,7 +10,9 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 
 
 public class SeatBooking {
@@ -18,7 +20,7 @@ public class SeatBooking {
     private JButton[][] stallButtons;
     private JButton[][] balconyButtons;
   
-    private enum SeatStatus {AVAILABLE, BOOKED, RESERVED, WHEELCHAIR}
+    private enum SeatStatus {AVAILABLE, BOOKED, RESERVED, WHEELCHAIR, SLIGHTLY_RESTRICTED}
 
     private Sidebar sidebar; 
     private JFrame window;
@@ -154,8 +156,6 @@ public class SeatBooking {
         
     
 
-        // Add the seat panels to the main panel
-
 
 
         // Add a refund seat button
@@ -187,7 +187,7 @@ public class SeatBooking {
 
         // Add a refund room button
         JButton refundRoomButton = new JButton("Refund Room");
-        refundRoomButton.setFont(new Font("Georgia", Font.PLAIN, 11));
+        refundRoomButton.setFont(new Font("Georgia", Font.PLAIN, 10));
         refundRoomButton.setBackground(new Color(181, 222, 184));
         refundRoomButton.setForeground(new Color(46, 83, 63));
         refundRoomButton.setFocusPainted(false);
@@ -350,17 +350,66 @@ public class SeatBooking {
 
       
     }
+    private static final Set<String> severelyRestrictedSeats = new HashSet<>();
+    static {
+        severelyRestrictedSeats.add("S 1");
+        severelyRestrictedSeats.add("S 2");
+        severelyRestrictedSeats.add("S 19");
+        severelyRestrictedSeats.add("S 20");
+        severelyRestrictedSeats.add("S 21");
+        severelyRestrictedSeats.add("S 41");
+        severelyRestrictedSeats.add("S 60");
+        severelyRestrictedSeats.add("B 61");
+        severelyRestrictedSeats.add("B 62");
+        severelyRestrictedSeats.add("B 79");
+        severelyRestrictedSeats.add("B 80");
+
+    }
+    private static final Set<String> slightlyRestrictedSeats = new HashSet<>();
+    static {
+        slightlyRestrictedSeats.add("S 3");
+        slightlyRestrictedSeats.add("S 18");
+        slightlyRestrictedSeats.add("S 61");
+        slightlyRestrictedSeats.add("S 80");
+        slightlyRestrictedSeats.add("B 3");
+        slightlyRestrictedSeats.add("B 16");
+    }
+
     private JButton createStyledSeatButton(String seatId, int width, int height) {
         JButton seatButton = new JButton(seatId);
         seatButton.setPreferredSize(new Dimension(width, height));
         seatButton.setFont(new Font("Georgia", Font.PLAIN, 16));
-        seatButton.setEnabled(true);
         seatButton.setToolTipText("Seat " + seatId);
         seatButton.setOpaque(true);
+
+        // Severely restricted (unsellable)
+        if (severelyRestrictedSeats.contains(seatId)) {
+            seatButton.setBackground(Color.BLACK);
+            seatButton.setForeground(Color.WHITE);
+            seatButton.setEnabled(true);
+            seatButton.setBorder(BorderFactory.createLineBorder(Color.DARK_GRAY));
+            seatButton.addActionListener(e ->
+                    JOptionPane.showMessageDialog(window, "These are restricted view seats.")
+            );
+            return seatButton;
+        }
+
+        // Slightly restricted (bookable but discounted)
+        if (slightlyRestrictedSeats.contains(seatId)) {
+            seatButton.setBackground(Color.PINK);
+            seatButton.setForeground(Color.DARK_GRAY);
+            seatButton.setBorder(new SimpleRoundedBorder(15, Color.DARK_GRAY));
+            seatButton.addActionListener(e -> {
+                JOptionPane.showMessageDialog(window, "This is a slightly restricted view seat. Price reduced by 25%.");
+                showSeatOptions(seatId, seatButton, SeatStatus.SLIGHTLY_RESTRICTED);
+            });
+            return seatButton;
+        }
+
+        // Regular seats
         seatButton.setBackground(new Color(181, 222, 184));
         seatButton.setForeground(new Color(46, 83, 63));
         seatButton.setBorder(new SimpleRoundedBorder(15, new Color(46, 83, 63)));
-
 
         seatButton.addMouseListener(new java.awt.event.MouseAdapter() {
             @Override
@@ -370,7 +419,6 @@ public class SeatBooking {
                 }
             }
 
-
             @Override
             public void mouseExited(java.awt.event.MouseEvent evt) {
                 if (seatButton.isEnabled()) {
@@ -379,9 +427,11 @@ public class SeatBooking {
             }
         });
 
-
         seatButton.addActionListener(e -> showSeatOptions(seatId, seatButton));
         return seatButton;
+    }
+    private void showSeatOptions(String seatId, JButton seatButton, SeatStatus statusOverride) {
+        updateSeatStatus(seatId, seatButton, statusOverride);
     }
 
     private void showSeatOptions(String seatId, JButton seatButton) {
@@ -759,15 +809,19 @@ public class SeatBooking {
             pstmt.setInt(4, roomId); 
             pstmt.executeUpdate();
 
-        if (status == SeatStatus.BOOKED || status == SeatStatus.RESERVED || status == SeatStatus.WHEELCHAIR) {
-            try (PreparedStatement pstmt1 = conn.prepareStatement(
-                "INSERT INTO Tickets (booking_id,seat_number, price) VALUES (?, ?, ?)")) {
-                pstmt1.setInt(1, BookingId);
-                pstmt1.setString(2, seatId);
-                pstmt1.setDouble(3, 6.50); 
-                pstmt1.executeUpdate();
+            if (status == SeatStatus.BOOKED || status == SeatStatus.RESERVED || status == SeatStatus.WHEELCHAIR || status == SeatStatus.SLIGHTLY_RESTRICTED) {
+                double price = 6.50;
+                if (status == SeatStatus.SLIGHTLY_RESTRICTED) {
+                    price = 6.50 * 0.75;
+                }
+                try (PreparedStatement pstmt1 = conn.prepareStatement(
+                        "INSERT INTO Tickets (booking_id,seat_number, price) VALUES (?, ?, ?)")) {
+                    pstmt1.setInt(1, BookingId);
+                    pstmt1.setString(2, seatId);
+                    pstmt1.setDouble(3, price);
+                    pstmt1.executeUpdate();
+                }
             }
-        }
             System.out.println("Saved booking for seat: " + seatId + " with status: " + status);
         } catch (SQLException e) {
             System.err.println("Error saving seat booking: " + e.getMessage());
